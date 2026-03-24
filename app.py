@@ -1,659 +1,227 @@
-"""
-YC Startup Research — Streamlit UI
-====================================
-• Batch selector (slide bar)
-• Natural language query box
-• Live agent activity feed
-• Results as a clean startup list
-• API key loaded from .env / environment
-"""
-
 import streamlit as st
+import pandas as pd
+import time
+import sys
 import os
-from dotenv import load_dotenv
 
-load_dotenv()  # Load .env automatically
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# ── Page config ───────────────────────────────────────────────────────────────
+from graph import run_extraction, build_graph
+from state import AgentState
 
+# ─── Page Config ──────────────────────────────────────────────
 st.set_page_config(
-    page_title="YC Startup Research",
-    page_icon="🔬",
+    page_title="Agentic Email Extractor",
+    page_icon="📧",
     layout="wide",
-    initial_sidebar_state="collapsed",
 )
 
-# ── Styles ────────────────────────────────────────────────────────────────────
-
+# ─── Custom CSS ───────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
-
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-html, body, .stApp {
-    background: #f5f2eb !important;
-    font-family: 'DM Sans', sans-serif;
-    color: #1a1611;
-}
-
-[data-testid="stSidebar"] { display: none; }
-[data-testid="stHeader"] { background: transparent; }
-#MainMenu, footer, header { visibility: hidden; }
-
-.block-container {
-    max-width: 1100px !important;
-    padding: 48px 32px 80px !important;
-}
-
-/* ── Hero ── */
-.hero {
-    margin-bottom: 52px;
-}
-.hero-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: #8a7e6e;
-    margin-bottom: 14px;
-}
-.hero-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: clamp(2.4rem, 5vw, 3.8rem);
-    line-height: 1.1;
-    color: #1a1611;
-    margin-bottom: 16px;
-}
-.hero-title em {
-    font-style: italic;
-    color: #c85c1a;
-}
-.hero-sub {
-    font-size: 1rem;
-    color: #6b5e4e;
-    max-width: 520px;
-    line-height: 1.6;
-}
-
-/* ── Batch selector ── */
-.batch-section { margin-bottom: 36px; }
-.batch-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 2.5px;
-    text-transform: uppercase;
-    color: #8a7e6e;
-    margin-bottom: 12px;
-}
-.batch-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.chip {
-    display: inline-block;
-    padding: 7px 18px;
-    border-radius: 99px;
-    border: 1.5px solid #c9bfaf;
-    background: transparent;
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    font-weight: 500;
-    color: #5a4e3e;
-    cursor: pointer;
-    transition: all 0.18s ease;
-    letter-spacing: 0.5px;
-}
-.chip:hover { border-color: #c85c1a; color: #c85c1a; }
-.chip.selected {
-    background: #c85c1a;
-    border-color: #c85c1a;
-    color: #fff;
-}
-
-/* ── Query box ── */
-.stTextArea textarea {
-    background: #fffdf8 !important;
-    border: 1.5px solid #c9bfaf !important;
-    border-radius: 12px !important;
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 15px !important;
-    color: #1a1611 !important;
-    padding: 16px !important;
-    resize: none !important;
-    box-shadow: none !important;
-    transition: border-color 0.2s ease !important;
-}
-.stTextArea textarea:focus {
-    border-color: #c85c1a !important;
-    box-shadow: 0 0 0 3px rgba(200,92,26,0.08) !important;
-}
-.stTextArea label {
-    font-family: 'DM Mono', monospace !important;
-    font-size: 10px !important;
-    letter-spacing: 2.5px !important;
-    text-transform: uppercase !important;
-    color: #8a7e6e !important;
-    margin-bottom: 8px !important;
-}
-
-/* ── Run button ── */
-.stButton > button {
-    background: #1a1611 !important;
-    color: #f5f2eb !important;
-    border: none !important;
-    border-radius: 10px !important;
-    padding: 13px 32px !important;
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 14px !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.3px !important;
-    cursor: pointer !important;
-    transition: all 0.2s ease !important;
-    width: auto !important;
-}
-.stButton > button:hover {
-    background: #c85c1a !important;
-    transform: translateY(-1px) !important;
-}
-
-/* ── Agent feed ── */
-.agent-feed {
-    background: #1a1611;
-    border-radius: 14px;
-    padding: 20px 24px;
-    margin: 28px 0 20px;
-    min-height: 120px;
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    line-height: 1.8;
-}
-.feed-header {
-    font-size: 9px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: #5a5040;
-    margin-bottom: 14px;
-}
-.feed-line { color: #a89880; }
-.feed-line.active { color: #f5c87a; }
-.feed-line.done { color: #6fcf97; }
-.feed-line.error { color: #f28b82; }
-
-/* ── Agent status bars ── */
-.agent-row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    border-radius: 10px;
-    margin: 5px 0;
-    background: #fffdf8;
-    border: 1.5px solid #e8e0d4;
-    transition: all 0.2s ease;
-}
-.agent-row.active {
-    border-color: #c85c1a;
-    background: #fff9f5;
-}
-.agent-row.done {
-    border-color: #6fcf97;
-    background: #f5fff8;
-}
-.agent-dot {
-    width: 9px; height: 9px;
-    border-radius: 50%;
-    background: #c9bfaf;
-    flex-shrink: 0;
-}
-.agent-dot.active { background: #c85c1a; animation: pulse 1s infinite; }
-.agent-dot.done { background: #6fcf97; }
-@keyframes pulse {
-    0%,100% { opacity: 1; } 50% { opacity: 0.3; }
-}
-.agent-name {
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    font-weight: 500;
-    color: #3a2e20;
-    min-width: 120px;
-}
-.agent-desc { font-size: 13px; color: #6b5e4e; flex: 1; }
-.agent-badge {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    padding: 3px 10px;
-    border-radius: 99px;
-    letter-spacing: 1px;
-}
-.badge-wait { background: #ede8de; color: #8a7e6e; }
-.badge-run  { background: #fde8d8; color: #c85c1a; }
-.badge-done { background: #d8f5e5; color: #2d9e5a; }
-
-/* ── Divider ── */
-.divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent, #c9bfaf 20%, #c9bfaf 80%, transparent);
-    margin: 36px 0;
-}
-
-/* ── Result header ── */
-.result-header {
-    display: flex;
-    align-items: baseline;
-    gap: 12px;
-    margin-bottom: 24px;
-}
-.result-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: 1.8rem;
-    color: #1a1611;
-}
-.result-count {
-    font-family: 'DM Mono', monospace;
-    font-size: 13px;
-    color: #8a7e6e;
-}
-
-/* ── Startup cards ── */
-.startup-card {
-    background: #fffdf8;
-    border: 1.5px solid #e0d8cc;
-    border-radius: 14px;
-    padding: 22px 26px;
-    margin-bottom: 14px;
-    transition: all 0.2s ease;
-    position: relative;
-    overflow: hidden;
-}
-.startup-card::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 3px;
-    background: #c85c1a;
-    border-radius: 3px 0 0 3px;
-}
-.startup-card:hover {
-    border-color: #c85c1a;
-    transform: translateX(3px);
-    box-shadow: -3px 4px 16px rgba(200,92,26,0.08);
-}
-.card-top {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 8px;
-}
-.card-name {
-    font-family: 'DM Serif Display', serif;
-    font-size: 1.2rem;
-    color: #1a1611;
-}
-.card-stage {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    padding: 4px 12px;
-    border-radius: 99px;
-    background: #f0ebe0;
-    color: #5a4e3e;
-    white-space: nowrap;
-}
-.card-stage.series-b { background: #ddf0e8; color: #1a6640; }
-.card-stage.series-c { background: #d8e8ff; color: #1a3d80; }
-.card-stage.series-d { background: #efe0ff; color: #5a1a80; }
-.card-stage.public { background: #fff0d0; color: #805a1a; }
-.card-desc {
-    font-size: 13.5px;
-    color: #5a4e3e;
-    line-height: 1.55;
-    margin-bottom: 12px;
-}
-.card-note {
-    font-size: 13px;
-    color: #8a7e6e;
-    font-style: italic;
-    line-height: 1.5;
-    margin-bottom: 14px;
-}
-.card-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-.meta-tag {
-    font-family: 'DM Mono', monospace;
-    font-size: 10.5px;
-    padding: 3px 10px;
-    border-radius: 6px;
-    background: #ede8de;
-    color: #5a4e3e;
-    letter-spacing: 0.3px;
-}
-.meta-raised {
-    font-family: 'DM Mono', monospace;
-    font-size: 10.5px;
-    color: #2d9e5a;
-    font-weight: 600;
-    margin-left: auto;
-}
-.card-link {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    color: #c85c1a;
-    text-decoration: none;
-    margin-top: 4px;
-    display: inline-block;
-}
-
-/* ── Empty state ── */
-.empty-state {
-    text-align: center;
-    padding: 60px 20px;
-    color: #8a7e6e;
-}
-.empty-state .big { font-size: 2.5rem; margin-bottom: 16px; }
-.empty-state p { font-size: 14px; line-height: 1.7; }
-
-/* ── Streamlit overrides ── */
-div[data-testid="stVerticalBlock"] > div { gap: 0 !important; }
-.stProgress > div > div { background: #c85c1a !important; border-radius: 99px !important; }
-.stProgress { background: #e8e0d4 !important; border-radius: 99px !important; }
+.big-title { font-size: 2.2rem; font-weight: 700; margin-bottom: 0; }
+.subtitle  { color: #888; font-size: 1rem; margin-top: 0; }
+.agent-log { background: #1e1e2e; color: #cdd6f4; padding: 12px 16px;
+             border-radius: 8px; font-family: monospace; font-size: 0.85rem; }
+.confidence-high   { background:#d1fae5; color:#065f46; padding:2px 8px; border-radius:12px; font-size:0.8rem; }
+.confidence-medium { background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:12px; font-size:0.8rem; }
+.confidence-low    { background:#fee2e2; color:#991b1b; padding:2px 8px; border-radius:12px; font-size:0.8rem; }
 </style>
 """, unsafe_allow_html=True)
 
+# ─── Header ───────────────────────────────────────────────────
+st.markdown('<p class="big-title">📧 Agentic Email Extractor</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Powered by LangGraph + Claude + OpenRouter (Perplexity)</p>', unsafe_allow_html=True)
+st.divider()
 
-# ── Session defaults ───────────────────────────────────────────────────────────
+# ─── Sidebar: API Keys ────────────────────────────────────────
+with st.sidebar:
+    st.header("🔑 API Keys")
+    anthropic_key = st.text_input("Anthropic API Key", type="password",
+                                   value=os.getenv("ANTHROPIC_API_KEY", ""))
+    openrouter_key = st.text_input("OpenRouter API Key", type="password",
+                                    value=os.getenv("OPENROUTER_API_KEY", ""))
 
-if "selected_batch" not in st.session_state:
-    st.session_state.selected_batch = "All"
-if "results" not in st.session_state:
-    st.session_state.results = []
-if "done" not in st.session_state:
-    st.session_state.done = False
+    if anthropic_key:
+        os.environ["ANTHROPIC_API_KEY"] = anthropic_key
+    if openrouter_key:
+        os.environ["OPENROUTER_API_KEY"] = openrouter_key
 
+    st.divider()
+    st.header("📋 Mode")
+    mode = st.radio("Select Mode", ["Single Search", "Batch (CSV Upload)"])
 
-# ── Hero ──────────────────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("**Agent Pipeline:**")
+    st.markdown("1. 🔍 Web Search Agent")
+    st.markdown("2. 🟠 YC Directory Agent")
+    st.markdown("3. 🌐 Website Scraper Agent")
+    st.markdown("4. 🤖 Email Guesser (Claude)")
+    st.markdown("5. ✅ Validator Agent")
 
-st.markdown("""
-<div class="hero">
-    <div class="hero-label">Y Combinator · Startup Intelligence</div>
-    <h1 class="hero-title">Find startups that<br><em>match your thesis.</em></h1>
-    <p class="hero-sub">
-        Select a YC batch, describe what you are looking for in plain English,
-        and let the research agents do the work.
-    </p>
-</div>
-""", unsafe_allow_html=True)
+# ─── Main Area ────────────────────────────────────────────────
 
+if mode == "Single Search":
+    col1, col2 = st.columns(2)
+    with col1:
+        company_name = st.text_input("🏢 Company Name", placeholder="e.g. Stripe, Airbnb, Linear")
+    with col2:
+        founder_name = st.text_input("👤 Founder Name (optional)", placeholder="e.g. Patrick Collison")
 
-# ── Batch selector ────────────────────────────────────────────────────────────
+    run_btn = st.button("🚀 Extract Emails", type="primary", use_container_width=True)
 
-BATCHES = ["All", "W25", "S24", "W24", "S23", "W23", "S22", "W22"]
+    if run_btn:
+        if not company_name:
+            st.error("Please enter a company name!")
+        elif not anthropic_key or not openrouter_key:
+            st.error("Please enter both API keys in the sidebar!")
+        else:
+            # ── Progress display ──
+            progress_bar = st.progress(0, text="Starting agents...")
+            log_box = st.empty()
+            logs = []
 
-st.markdown('<div class="batch-label">Select Batch</div>', unsafe_allow_html=True)
+            steps = [
+                (0.1,  "🔍 Web Search Agent running..."),
+                (0.30, "🟠 YC Directory Agent scraping..."),
+                (0.55, "🌐 Website Scraper running..."),
+                (0.75, "🤖 Claude Email Guesser running..."),
+                (0.90, "✅ Validator Agent checking emails..."),
+                (1.0,  "🎉 Done!"),
+            ]
 
-cols = st.columns(len(BATCHES))
-for i, batch in enumerate(BATCHES):
-    with cols[i]:
-        selected = st.session_state.selected_batch == batch
-        label = f"**{batch}**" if selected else batch
-        if st.button(batch, key=f"batch_{batch}", use_container_width=True):
-            st.session_state.selected_batch = batch
-            st.rerun()
+            # Animate progress while running
+            results_placeholder = st.empty()
 
-# Visual indicator
-active = st.session_state.selected_batch
-chips_html = "".join(
-    f'<span class="chip {"selected" if b == active else ""}">{b}</span>'
-    for b in BATCHES
-)
-st.markdown(f'<div class="batch-chips">{chips_html}</div>', unsafe_allow_html=True)
+            with st.spinner("Agents are working... this may take 30-60 seconds"):
+                # Run actual extraction
+                try:
+                    final_state = run_extraction(company_name, founder_name)
+                except Exception as e:
+                    st.error(f"Pipeline error: {str(e)}")
+                    st.stop()
 
-st.markdown("<div style='margin: 24px 0'></div>", unsafe_allow_html=True)
+            # Show full progress after completion
+            for prog, msg in steps:
+                progress_bar.progress(prog, text=msg)
+                time.sleep(0.2)
 
+            # ── Show logs ──
+            st.subheader("📜 Agent Logs")
+            log_html = '<div class="agent-log">'
+            for msg in final_state.get("messages", []):
+                log_html += f"{msg}<br>"
+            if final_state.get("errors"):
+                for err in final_state["errors"]:
+                    log_html += f'<span style="color:#f38ba8">⚠️ {err}</span><br>'
+            log_html += "</div>"
+            st.markdown(log_html, unsafe_allow_html=True)
 
-# ── Query ─────────────────────────────────────────────────────────────────────
+            # ── Show results ──
+            final_emails = final_state.get("final_emails", [])
+            st.divider()
 
-query = st.text_area(
-    "RESEARCH QUERY",
-    placeholder='e.g.  "Give me the name list of startups which have Series B and are in health AI tech"',
-    height=90,
-    key="query_input",
-    label_visibility="visible",
-)
+            if not final_emails:
+                st.warning("😔 No emails found. Try a different company name or check your API keys.")
+            else:
+                st.subheader(f"📧 Found {len(final_emails)} Emails")
 
-st.markdown("<div style='margin: 16px 0'></div>", unsafe_allow_html=True)
+                # Build DataFrame
+                df = pd.DataFrame(final_emails)
+                df.columns = [c.capitalize() for c in df.columns]
 
-run_col, _ = st.columns([1, 4])
-with run_col:
-    run = st.button("Run Research →", use_container_width=False)
+                # Color-coded confidence
+                def highlight_conf(val):
+                    colors = {"high": "background-color: #d1fae5",
+                              "medium": "background-color: #fef3c7",
+                              "low": "background-color: #fee2e2"}
+                    return colors.get(val.lower(), "")
 
+                styled_df = df.style.applymap(highlight_conf, subset=["Confidence"])
+                st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
-# ── Research pipeline ─────────────────────────────────────────────────────────
+                # ── Download buttons ──
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    csv = df.to_csv(index=False)
+                    st.download_button(
+                        "⬇️ Download CSV",
+                        data=csv,
+                        file_name=f"{company_name.lower().replace(' ', '_')}_emails.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                with col_b:
+                    emails_only = "\n".join([e["email"] for e in final_emails])
+                    st.download_button(
+                        "⬇️ Download Emails Only (.txt)",
+                        data=emails_only,
+                        file_name=f"{company_name.lower().replace(' ', '_')}_emails.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
 
-AGENT_ICONS = {
-    "scraper": "⬡",
-    "filter":  "◈",
-    "analyst": "◉",
-    "critic":  "◎",
-}
+                # ── Stats ──
+                st.divider()
+                st.subheader("📊 Stats")
+                c1, c2, c3, c4 = st.columns(4)
+                high = sum(1 for e in final_emails if e["confidence"] == "high")
+                med  = sum(1 for e in final_emails if e["confidence"] == "medium")
+                low  = sum(1 for e in final_emails if e["confidence"] == "low")
+                c1.metric("Total Emails", len(final_emails))
+                c2.metric("🟢 High Confidence", high)
+                c3.metric("🟡 Medium Confidence", med)
+                c4.metric("🔴 Low Confidence", low)
 
-AGENT_LABELS = {
-    "scraper": "Scraper",
-    "filter":  "Filter Agent",
-    "analyst": "Analyst",
-    "critic":  "Critic",
-}
+# ─── Batch Mode ───────────────────────────────────────────────
+else:
+    st.subheader("📁 Batch Mode — Upload CSV")
+    st.markdown("CSV must have a `company` column. Optional: `founder` column.")
 
-AGENT_DESCS = {
-    "scraper": "Fetching startups from YC directory",
-    "filter":  "Applying your query to narrow results",
-    "analyst": "Enriching each startup with funding data",
-    "critic":  "Scoring result quality — may loop back",
-}
+    uploaded = st.file_uploader("Upload CSV", type=["csv"])
 
-ORDER = ["scraper", "filter", "analyst", "critic"]
+    if uploaded:
+        df_input = pd.read_csv(uploaded)
+        st.write("Preview:", df_input.head())
 
+        if "company" not in df_input.columns:
+            st.error("CSV must have a 'company' column!")
+        else:
+            run_batch = st.button("🚀 Run Batch Extraction", type="primary")
 
-def render_agent_row(name: str, status: str, detail: str = ""):
-    icon = AGENT_ICONS[name]
-    label = AGENT_LABELS[name]
-    desc = detail or AGENT_DESCS[name]
-    dot_cls = "active" if status == "active" else ("done" if status == "done" else "")
-    row_cls = "active" if status == "active" else ("done" if status == "done" else "")
-    badge = (
-        '<span class="agent-badge badge-run">RUNNING</span>' if status == "active"
-        else '<span class="agent-badge badge-done">DONE</span>' if status == "done"
-        else '<span class="agent-badge badge-wait">WAITING</span>'
-    )
-    return f"""
-<div class="agent-row {row_cls}">
-    <div class="agent-dot {dot_cls}"></div>
-    <span class="agent-name">{icon} {label}</span>
-    <span class="agent-desc">{desc}</span>
-    {badge}
-</div>"""
+            if run_batch:
+                if not anthropic_key or not openrouter_key:
+                    st.error("Please enter both API keys in the sidebar!")
+                else:
+                    all_results = []
+                    progress = st.progress(0)
+                    status = st.empty()
 
+                    for i, row in df_input.iterrows():
+                        company = row["company"]
+                        founder = row.get("founder", "") if "founder" in df_input.columns else ""
+                        status.text(f"Processing {i+1}/{len(df_input)}: {company}")
 
-def stage_badge(stage: str) -> str:
-    s = stage.lower()
-    cls = ""
-    if "series b" in s: cls = "series-b"
-    elif "series c" in s: cls = "series-c"
-    elif "series d" in s or "series e" in s or "series f" in s: cls = "series-d"
-    elif "public" in s or "ipo" in s: cls = "public"
-    return f'<span class="card-stage {cls}">{stage}</span>'
+                        try:
+                            result = run_extraction(str(company), str(founder) if founder else "")
+                            for email in result.get("final_emails", []):
+                                all_results.append({
+                                    "company": company,
+                                    **email
+                                })
+                        except Exception as e:
+                            st.warning(f"Failed for {company}: {e}")
 
+                        progress.progress((i + 1) / len(df_input))
 
-def render_card(s: dict, idx: int) -> str:
-    name = s.get("name", "Unknown")
-    desc = s.get("description", "")[:200]
-    note = s.get("one_line_note", "")
-    stage = s.get("funding_stage") or s.get("stage") or "Unknown"
-    raised = s.get("total_raised", "Unknown")
-    model = s.get("business_model", "")
-    tags = s.get("tags", [])
-    url = s.get("url", "#")
-    batch = s.get("batch", "")
+                    status.text("✅ Batch complete!")
 
-    tag_html = "".join(f'<span class="meta-tag">{t}</span>' for t in tags[:4])
-    if model:
-        tag_html += f'<span class="meta-tag">{model}</span>'
-    if batch:
-        tag_html += f'<span class="meta-tag">{batch}</span>'
-
-    raised_html = f'<span class="meta-raised">↑ {raised}</span>' if raised and raised != "Unknown" else ""
-
-    return f"""
-<div class="startup-card">
-    <div class="card-top">
-        <span class="card-name">{idx}. {name}</span>
-        {stage_badge(stage)}
-    </div>
-    <p class="card-desc">{desc}</p>
-    {f'<p class="card-note">"{note}"</p>' if note else ''}
-    <div class="card-meta">
-        {tag_html}
-        {raised_html}
-    </div>
-    <a class="card-link" href="{url}" target="_blank">↗ {url[:50]}</a>
-</div>"""
-
-
-if run:
-    if not query or len(query.strip()) < 5:
-        st.error("Please enter a research query.")
-        st.stop()
-
-    key = os.environ.get("OPENROUTER_API_KEY", "")
-    if not key:
-        st.error("OPENROUTER_API_KEY not found. Add it to your .env file.")
-        st.stop()
-
-    try:
-        from agents import run_pipeline
-    except ImportError as e:
-        st.error(f"Could not import agents.py: {e}")
-        st.stop()
-
-    st.session_state.done = False
-    st.session_state.results = []
-
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-    st.markdown("**Agent Activity**")
-
-    agent_placeholder = st.empty()
-    progress_bar = st.progress(0)
-    status_note = st.empty()
-
-    agent_states = {a: "waiting" for a in ORDER}
-    agent_details = {a: "" for a in ORDER}
-
-    def refresh_agents():
-        html = "".join(
-            render_agent_row(a, agent_states[a], agent_details[a])
-            for a in ORDER
-        )
-        agent_placeholder.markdown(html, unsafe_allow_html=True)
-
-    refresh_agents()
-
-    log_lines = []
-    log_box = st.empty()
-
-    def push_log(line: str, cls: str = ""):
-        log_lines.append(f'<div class="feed-line {cls}">{line}</div>')
-        log_box.markdown(
-            f'<div class="agent-feed"><div class="feed-header">— live log —</div>'
-            + "".join(log_lines[-12:]) + "</div>",
-            unsafe_allow_html=True,
-        )
-
-    push_log(f"Starting pipeline · batch={st.session_state.selected_batch} · query=\"{query[:60]}...\"")
-
-    PROGRESS_MAP = {
-        "scraper": (5, 25),
-        "filter":  (25, 55),
-        "analyst": (55, 85),
-        "critic":  (85, 100),
-    }
-
-    try:
-        for step in run_pipeline(
-            batch=st.session_state.selected_batch,
-            query=query.strip(),
-            max_iterations=2,
-        ):
-            for node_name, state in step.items():
-                msgs = state.get("messages", [])
-                last_msg = msgs[-1].content if msgs else ""
-
-                # Mark previous nodes done
-                idx_current = ORDER.index(node_name) if node_name in ORDER else -1
-                for prev in ORDER[:idx_current]:
-                    agent_states[prev] = "done"
-
-                agent_states[node_name] = "active"
-                agent_details[node_name] = ""
-                refresh_agents()
-
-                # Progress
-                lo, hi = PROGRESS_MAP.get(node_name, (0, 100))
-                progress_bar.progress(lo)
-                status_note.caption(f"Running {AGENT_LABELS.get(node_name, node_name)}...")
-                push_log(last_msg, "active")
-
-                # Completed
-                agent_states[node_name] = "done"
-                agent_details[node_name] = last_msg.split("]", 1)[-1].strip() if "]" in last_msg else ""
-                progress_bar.progress(hi)
-                refresh_agents()
-
-                if state.get("status") == "done" and state.get("final_list"):
-                    st.session_state.results = state["final_list"]
-                    st.session_state.done = True
-                    push_log(f"Pipeline complete — {len(state['final_list'])} startups found.", "done")
-
-                elif state.get("status") == "filtering" and node_name == "critic":
-                    push_log(f"Critic score: {state.get('quality_score', '?')}/10 — looping back to Filter Agent.", "active")
-                    # Reset filter and analyst for re-run visual
-                    agent_states["filter"] = "waiting"
-                    agent_states["analyst"] = "waiting"
-                    refresh_agents()
-
-        progress_bar.progress(100)
-        status_note.caption("Research complete.")
-
-    except Exception as e:
-        st.error(f"Pipeline error: {e}")
-        st.exception(e)
-
-
-# ── Results ───────────────────────────────────────────────────────────────────
-
-if st.session_state.done and st.session_state.results:
-    results = st.session_state.results
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="result-header">'
-        f'<span class="result-title">Research Results</span>'
-        f'<span class="result-count">{len(results)} startups matched</span>'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
-
-    for i, s in enumerate(results, 1):
-        st.markdown(render_card(s, i), unsafe_allow_html=True)
-
-elif not st.session_state.done:
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div class="empty-state">
-        <div class="big">🔬</div>
-        <p>Select a YC batch above, describe what you are looking for,<br>
-        and press <strong>Run Research</strong> to start the agent pipeline.</p>
-    </div>
-    """, unsafe_allow_html=True)
+                    if all_results:
+                        df_out = pd.DataFrame(all_results)
+                        st.dataframe(df_out, use_container_width=True)
+                        st.download_button(
+                            "⬇️ Download All Results",
+                            data=df_out.to_csv(index=False),
+                            file_name="batch_emails.csv",
+                            mime="text/csv"
+                        )
