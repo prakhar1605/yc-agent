@@ -1,7 +1,7 @@
 from typing import TypedDict, List, Optional, Annotated
 import operator
 
-
+ 
 class EmailResult(TypedDict):
     email: str
     source: str
